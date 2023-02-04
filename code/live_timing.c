@@ -3,6 +3,7 @@
 #include<assert.h>
 #include<stdio.h>
 #include<unistd.h>
+#include<stdlib.h>
 
 #include<signal.h>
 #include<time.h>
@@ -20,6 +21,8 @@
 int handler;
 
 void INThandler(int);
+void get_data(char buf[3], char adc_channel, short store[MAX_ARR_LEN], int arr_len);
+void send_data(void* responder, short store[MAX_ARR_LEN], int arr_len);
 
 int main(){
   printf("Started\n");
@@ -34,7 +37,6 @@ int main(){
   char recv_buf[10];
    
   printf("Context created!\n");
-  int i;
   int speed = 800000;
   char adc_channel = 0;
   char buf[3];
@@ -51,7 +53,7 @@ int main(){
   //1 -> single shot data
   int mode;
 
-  int arr_len
+  int arr_len;
   
   int rc = zmq_bind(responder, "tcp://*:5555");
   assert(rc == 0);
@@ -62,24 +64,65 @@ int main(){
   if(handler < 0) return 2;
 
   while(1){
+    printf("Waiting for message!!\n");
     zmq_recv(responder, recv_buf, 10, 0);
     printf("Received: %s", recv_buf);
     
     mode = *recv_buf - '0';
     arr_len = atoi(recv_buf+2);
 
+
     //different operations depending on received instruction 
-    printf("Waiting Trigger\n");
+    if(mode){
+      //Single shot data send
+      zmq_send(responder, "Single", 6, 0);
+      printf("Waiting Trigger\n");
+      
+      while(1)
+        if(gpioRead(TRIGGER_PIN) == PI_LOW){
+          clock_gettime(CLOCK_REALTIME, &gettime_now);
+          start_time = gettime_now.tv_nsec;
+          break;
+        }
+      
 
-    while(1)
-      if(gpioRead(TRIGGER_PIN) == PI_LOW){
-        clock_gettime(CLOCK_REALTIME, &gettime_now);
-	      start_time = gettime_now.tv_nsec;
-        break;
+      get_data(buf, adc_channel, store, arr_len);
+      
+      clock_gettime(CLOCK_REALTIME, &gettime_now);
+      time_difference = gettime_now.tv_nsec - start_time;
+      if(time_difference<0)
+        time_difference += 1000000000;
+
+      send_data(responder, store, arr_len);
+
+      printf("\n%ld ns time taken\n", time_difference);
+    }
+    else{
+      zmq_send(responder, "Stream", 6, 0);
+      
+      while(1){
+        zmq_recv(responder, recv_buf, 1, 0);
+        if(*recv_buf - '0' == 0)
+          break;
+
+        get_data(buf, adc_channel, store, arr_len);
+        send_data(responder, store, arr_len);
       }
-    
+    }
 
-    for(i=0; i<MAX_ARR_LEN; i++){
+    sleep(1);
+  }  
+  
+  spiClose(handler);
+
+  gpioTerminate();
+
+  return 0;
+}
+
+
+void get_data(char buf[3], char adc_channel, short store[MAX_ARR_LEN], int arr_len){
+  for(int i=0; i<arr_len; i++){
       /*
       SPI read starts after 11000 is transmitted
       1 -> start bit
@@ -103,32 +146,16 @@ int main(){
       spiXfer(handler, buf, buf, 3);
       store[i] = ((buf[1]&15)<<8) + buf[2];
     }
-    
-    clock_gettime(CLOCK_REALTIME, &gettime_now);
-    time_difference = gettime_now.tv_nsec - start_time;
-    if(time_difference<0)
-      time_difference += 1000000000;
+}
 
-    if(zmq_send(responder, &store, sizeof(store), 0) != -1)
-      //printf("%d bytes sent successfully\n", sizeof(store));
-      printf("\n%ld ns time taken\n", time_difference);
+
+void send_data(void* responder, short store[MAX_ARR_LEN], int arr_len){
+  if(zmq_send(responder, &store, arr_len, 0) != -1)
+      printf("%d bytes sent successfully\n", arr_len);
     else
       printf("Error sending data\n"); 
-
-    //PRINT THE DATA
-    //for(int i=0; i<MAX_ARR_LEN; i++){
-    //  printf("%d ", store[i]);
-    //}
-
-    sleep(1);
-  }  
-  
-  spiClose(handler);
-
-  gpioTerminate();
-
-  return 0;
 }
+
 
 void INThandler(int sig){
   signal(sig, SIG_IGN);
