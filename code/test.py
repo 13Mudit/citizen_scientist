@@ -1,47 +1,55 @@
-import tkinter
-
-from matplotlib.backends.backend_tkagg import (
-    FigureCanvasTkAgg, NavigationToolbar2Tk)
-# Implement the default Matplotlib key bindings.
-from matplotlib.backend_bases import key_press_handler
-from matplotlib.figure import Figure
+import random
+import tkinter as Tk
+from itertools import count
 
 import numpy as np
 
-
-root = tkinter.Tk()
-root.wm_title("Embedding in Tk")
-
-fig = Figure(figsize=(5, 4), dpi=100)
-t = np.arange(0, 3, .01)
-fig.add_subplot(111).plot(t, 2 * np.sin(2 * np.pi * t))
-
-canvas = FigureCanvasTkAgg(fig, master=root)  # A tk.DrawingArea.
-canvas.draw()
-canvas.get_tk_widget().pack(side=tkinter.TOP, fill=tkinter.BOTH, expand=1)
-
-toolbar = NavigationToolbar2Tk(canvas, root)
-toolbar.update()
-canvas.get_tk_widget().pack(side=tkinter.TOP, fill=tkinter.BOTH, expand=1)
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 
-def on_key_press(event):
-    print("you pressed {}".format(event.key))
-    key_press_handler(event, canvas, toolbar)
+import zmq
 
 
-canvas.mpl_connect("key_press_event", on_key_press)
+context = zmq.Context()
+
+print("Connecting to server...")
+socket = context.socket(zmq.REQ)
+socket.connect("tcp://localhost:5555")
 
 
-def _quit():
-    root.quit()     # stops mainloop
-    root.destroy()  # this is necessary on Windows to prevent
-                    # Fatal Python Error: PyEval_RestoreThread: NULL tstate
+socket.send(b'RLC')
+print(str(socket.recv()))
+
+plt.style.use('fivethirtyeight')
 
 
-button = tkinter.Button(master=root, text="Quit", command=_quit)
-button.pack(side=tkinter.BOTTOM)
+def animate(i):
+    socket.send(b'1')
+    print("Waiting for message")
+    message = socket.recv()
+    data = np.frombuffer(message, dtype=np.uint16)
+    data = data[7:]
+    x_vals = np.array(len(data))
 
-tkinter.mainloop()
-# If you put root.destroy() here, it will cause an error if the window is
-# closed with the window manager.
+    # Get all axes of figure
+    ax = plt.gcf().get_axes()
+    # Clear current data
+    ax.cla()
+    # Plot new data
+    ax.plot(x_vals, data)
+
+
+# GUI
+root = Tk.Tk()
+label = Tk.Label(root, text="Realtime Animated Graphs").grid(column=0, row=0)
+
+# graph 1
+canvas = FigureCanvasTkAgg(plt.gcf(), master=root)
+canvas.get_tk_widget().grid(column=0, row=1)
+# Create two subplots in row 1 and column 1, 2
+plt.gcf().subplots(1, 1)
+ani = FuncAnimation(plt.gcf(), animate, interval=100, blit=False)
+
+Tk.mainloop()

@@ -38,7 +38,7 @@ int main(){
    
   printf("Context created!\n");
   int speed = 800000;
-  char adc_channel = 0;
+  char adc_channel = 3;
   char buf[3];
 
   short store[MAX_ARR_LEN];
