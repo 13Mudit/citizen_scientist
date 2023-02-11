@@ -16,8 +16,8 @@
 #define SOS_ARR_LEN 10000
 #define SOS_TRIGGER_PIN 26
 
-#define RLC_ARR_LEN 1000
-#define RLC_TRIGGER_PIN 25
+#define RLC_ARR_LEN 600
+#define RLC_TRIGGER_PIN 24
 
 #define PHOTOGATE_ARR_LEN 100
 #define PHOTOGATE_PIN 27
@@ -85,7 +85,7 @@ int main(){
       filter(responder);
     else if(!strcmp(recv_buf, "PH"))
       ph(responder);
-    else if(!strcmp(recv_buf, "PHO"))
+    else if(!strcmp(recv_buf, "PHOTO"))
       photo(responder);
 
 
@@ -107,7 +107,7 @@ void sos(void *responder){
 
   short store[SOS_ARR_LEN];
 
-  zmq_send(responder, "SOS", 3, 0);
+  // zmq_send(responder, "SOS", 3, 0);
   // printf("Waiting Trigger\n");
   
   while(1)
@@ -219,8 +219,8 @@ void get_data(char buf[3], char adc_channel, short *store, int arr_len){
 
 
 void send_data(void* responder, short *store, int arr_len){
-  if(zmq_send(responder, &store, arr_len, 0) != -1)
-      printf("%d bytes sent successfully\n", arr_len);
+  if(zmq_send(responder, store, arr_len*2, 0) != -1)
+      printf("%d readings sent successfully\n", arr_len);
     else
       printf("Error sending data\n"); 
 }
