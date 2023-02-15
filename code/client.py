@@ -28,7 +28,7 @@ plt.style.use('fivethirtyeight')
 
 def animate(i):
     socket.send(b'1')
-    print("Waiting for message")
+    # print("Waiting for message")
     message = socket.recv()
     data = np.frombuffer(message, dtype=np.uint16)
     x_vals = np.arange(len(data))

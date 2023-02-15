@@ -63,7 +63,7 @@ int main(){
   if(handler < 0) return 2;
 
   while(1){
-    printf("Waiting for message!!\n");
+    // printf("Waiting for message!!\n");
     zmq_recv(responder, recv_buf, 10, 0);
     printf("Received: %s ", recv_buf);
     
@@ -219,10 +219,8 @@ void get_data(char buf[3], char adc_channel, short *store, int arr_len){
 
 
 void send_data(void* responder, short *store, int arr_len){
-  if(zmq_send(responder, store, arr_len*2, 0) != -1)
-      printf("%d readings sent successfully\n", arr_len);
-    else
-      printf("Error sending data\n"); 
+  if(zmq_send(responder, store, arr_len*2, 0) == -1)
+      fprintf( stderr, "Error sending data\n");
 }
 
 
