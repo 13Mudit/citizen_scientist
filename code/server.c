@@ -16,18 +16,23 @@
 #define SOS_ARR_LEN 10000
 #define SOS_TRIGGER_PIN 26
 
-#define RLC_ARR_LEN 600
+#define MAX_RLC_ARR_LEN 4000
 #define RLC_TRIGGER_PIN 24
+#define RC_TRIGGER_PIN 25
 
 #define PHOTOGATE_ARR_LEN 100
 #define PHOTOGATE_PIN 27
+
+#define DIODE_BUFFER_ARR_LEN 16
+#define DIODE_ARR_LEN (100 * DIODE_BUFFER_ARR_LEN)
+#define DIODE_PWM_PIN 12
 
 
 int handler;
 
 void INThandler(int);
-void get_data(char buf[3], char adc_channel, short *store, int arr_len);
-void send_data(void* responder, short *store, int arr_len);
+void get_data(char buf[3], char adc_channel, unsigned short *store, int arr_len);
+void send_data(void* responder, unsigned short *store, int arr_len);
 
 
 void sos(void *responder);
@@ -63,8 +68,9 @@ int main(){
   if(handler < 0) return 2;
 
   while(1){
-    // printf("Waiting for message!!\n");
+
     zmq_recv(responder, recv_buf, 10, 0);
+    sleep(1);
     printf("Received: %s ", recv_buf);
     
 
@@ -85,9 +91,8 @@ int main(){
       filter(responder);
     else if(!strcmp(recv_buf, "PH"))
       ph(responder);
-    else if(!strcmp(recv_buf, "PHOTO"))
+    else if(!strcmp(recv_buf, "PHO"))
       photo(responder);
-
 
     sleep(1);
   }  
@@ -104,19 +109,36 @@ void sos(void *responder){
 
   char adc_channel = 0;
   char buf[3];
+  char recv_buf[5];
 
-  short store[SOS_ARR_LEN];
+  unsigned short store[SOS_ARR_LEN];
+  int break_outer = 0;
 
-  // zmq_send(responder, "SOS", 3, 0);
-  // printf("Waiting Trigger\n");
-  
-  while(1)
-    if(gpioRead(SOS_TRIGGER_PIN) == PI_LOW)
+  zmq_send(responder, "SOS", 3, 0);
+
+  gpioSetMode(SOS_TRIGGER_PIN, PI_INPUT);
+
+  while(1){
+    while(1){
+      
+      zmq_recv(responder, recv_buf, 1, 0);
+      if(*recv_buf - '0' == 0){
+        zmq_send(responder, "SOS Exited", 10, 0);
+        break_outer = 1;
+        break;
+      }
+
+      if(gpioRead(SOS_TRIGGER_PIN) == PI_LOW)
+        break;
+    }
+
+    get_data(buf, adc_channel, store, SOS_ARR_LEN);
+
+    if(break_outer)
       break;
-  
 
-  get_data(buf, adc_channel, store, SOS_ARR_LEN);
-  send_data(responder, store, SOS_ARR_LEN);
+    send_data(responder, store, SOS_ARR_LEN);
+  }
 }
 
 
@@ -127,24 +149,30 @@ void rlc(void *responder){
 
   char recv_buf[5];
 
-  short store[RLC_ARR_LEN];
+  unsigned int rlc_arr_len = 600;
+  unsigned short store[MAX_RLC_ARR_LEN];
 
   zmq_send(responder, "RLC", 3, 0);
 
   gpioSetMode(RLC_TRIGGER_PIN, PI_OUTPUT);
+  gpioSetMode(RC_TRIGGER_PIN, PI_OUTPUT);
 
   while(1){
 
     zmq_recv(responder, recv_buf, 1, 0);
-    if(*recv_buf - '0' == 0)
+    if(*recv_buf - '0' == 0){
+      zmq_send(responder, "RLC Exited", 10, 0);
       break;
+    }
 
     gpioWrite(RLC_TRIGGER_PIN, 1);
-    get_data(buf, adc_channel, store, RLC_ARR_LEN/2);
+    gpioWrite(RC_TRIGGER_PIN, 1);
+    get_data(buf, adc_channel, store, MAX_RLC_ARR_LEN/2);
     gpioWrite(RLC_TRIGGER_PIN, 0);
-    get_data(buf, adc_channel, &store[RLC_ARR_LEN/2], RLC_ARR_LEN/2);
+    gpioWrite(RC_TRIGGER_PIN, 0);
+    get_data(buf, adc_channel, &store[MAX_RLC_ARR_LEN/2], MAX_RLC_ARR_LEN/2);
 
-    send_data(responder, store, RLC_ARR_LEN);
+    send_data(responder, store, MAX_RLC_ARR_LEN);
   }
 }
 
@@ -153,7 +181,63 @@ void pwm(void *responder){
 }
 
 void diode(void *responder){
-  
+  char voltage_adc_channel = 2;
+  char current_adc_channel = 1;
+
+  int freq = 2000000;
+  int status;
+
+  char buf[3];
+
+  char recv_buf[5];
+
+  unsigned short voltage_current_store[DIODE_ARR_LEN*2];
+
+  zmq_send(responder, "DIODE", 5, 0);
+
+
+  // gpioSetMode(DIODE_PWM_PIN, PI_OUTPUT);
+
+
+  while(1){
+
+    zmq_recv(responder, recv_buf, 1, 0);
+    if(*recv_buf - '0' == 0){
+      zmq_send(responder, "RLC Exited", 10, 0);
+      break;
+    }
+
+
+    // gpioWrite(DIODE_PWM_PIN, 1);
+    // while(1);
+
+    for(int i=0; i<(DIODE_ARR_LEN/DIODE_BUFFER_ARR_LEN); i++){
+
+      status = gpioHardwarePWM(DIODE_PWM_PIN, freq, i*10000);
+      if(status){
+        printf("Error in PWM %d\n", status);
+        break;
+      }
+
+      gpioDelay(1000);
+
+      get_data(buf, voltage_adc_channel, (voltage_current_store + i*DIODE_BUFFER_ARR_LEN), DIODE_BUFFER_ARR_LEN);
+      get_data(buf, current_adc_channel, (voltage_current_store + DIODE_ARR_LEN + i*DIODE_BUFFER_ARR_LEN), DIODE_BUFFER_ARR_LEN);
+
+    }
+    
+    status = gpioHardwarePWM(DIODE_PWM_PIN, 0, 0);
+    if(status){
+      printf("Error in PWM %d\n", status);
+      break;
+    }
+
+    send_data(responder, voltage_current_store, DIODE_ARR_LEN*2);
+
+    gpioDelay(500000);
+  }
+
+
 }
 
 void temp(void *responder){
@@ -169,7 +253,7 @@ void ph(void *responder){
 }
 
 void photo(void *responder){
-  short store[PHOTOGATE_ARR_LEN];
+  unsigned short store[PHOTOGATE_ARR_LEN];
   char recv_buf[5];
 
   zmq_send(responder, "PHOTO", 5, 0);
@@ -179,8 +263,10 @@ void photo(void *responder){
   while(1){
 
     zmq_recv(responder, recv_buf, 1, 0);
-    if(*recv_buf - '0' == 0)
+    if(*recv_buf - '0' == 0){
+      zmq_send(responder, "PHOTOGATE Exited", 16, 0);
       break;
+    }
 
     for(int i=0; i<PHOTOGATE_ARR_LEN; i++)
       store[i] = gpioRead(PHOTOGATE_PIN);
@@ -190,7 +276,7 @@ void photo(void *responder){
 
 }
 
-void get_data(char buf[3], char adc_channel, short *store, int arr_len){
+void get_data(char buf[3], char adc_channel, unsigned short *store, int arr_len){
   for(int i=0; i<arr_len; i++){
       /*
       SPI read starts after 11000 is transmitted
@@ -218,7 +304,7 @@ void get_data(char buf[3], char adc_channel, short *store, int arr_len){
 }
 
 
-void send_data(void* responder, short *store, int arr_len){
+void send_data(void* responder, unsigned short *store, int arr_len){
   if(zmq_send(responder, store, arr_len*2, 0) == -1)
       fprintf( stderr, "Error sending data\n");
 }
